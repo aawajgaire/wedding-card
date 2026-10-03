@@ -129,14 +129,36 @@ footer{text-align:center;color:var(--muted);font-size:13px}
 
 <script>
 // Style 3C "ticket" name plate, drawn in the 130px band (y 179–309) above "निमन्त्रणा".
-// The plate is centred horizontally and vertically; with no address it shrinks to one line and stays centred.
+// Text is drawn left-aligned on a scratch canvas, its real ink is measured pixel by pixel,
+// and it is then placed by hand. This avoids relying on canvas textAlign/measureText,
+// which some phone browsers get wrong (text started at the centre line instead of around it).
 var GUEST = (function(){
   var MAROON = "#7a1828", BROWN = "#6b3a22", CREAM = "rgba(253,246,226,.95)";
   var TOP = 179, H = 130;
-  function fit(g, text, weight, size, maxW, min){
-    do { g.font = weight + " " + size + 'px "CardDeva"'; size--; } while (g.measureText(text).width > maxW && size > min);
-    return size + 1;
+
+  function inkText(text, weight, size, color){
+    var pad = Math.ceil(size), w = Math.min(6000, Math.ceil(text.length * size * 1.3) + pad * 2), h = Math.ceil(size * 2.4);
+    var c = document.createElement("canvas"); c.width = w; c.height = h;
+    var x = c.getContext("2d");
+    x.font = weight + " " + size + 'px "CardDeva"';
+    x.textAlign = "left"; x.textBaseline = "alphabetic"; x.direction = "ltr";
+    x.fillStyle = color;
+    var base = Math.round(size * 1.6);
+    x.fillText(text, pad, base);
+    var d = x.getImageData(0, 0, w, h).data, l = w, r = -1;
+    for (var px = 0; px < w; px++) {
+      for (var py = 0; py < h; py++) { if (d[(py * w + px) * 4 + 3] > 24) { if (px < l) l = px; r = px; break; } }
+    }
+    if (r < 0) { l = 0; r = 0; }
+    return {canvas: c, l: l, r: r, w: r - l + 1, base: base};
   }
+  function fitInk(text, weight, size, maxW, min, color){
+    var t;
+    do { t = inkText(text, weight, size, color); size--; } while (t.w > maxW && size >= min);
+    t.size = size + 1; return t;
+  }
+  function place(g, t, cx, baseY){ g.drawImage(t.canvas, Math.round(cx - t.w / 2 - t.l), Math.round(baseY - t.base)); }
+
   function notched(g, x, y, w, h, r){
     g.beginPath(); g.moveTo(x+r, y); g.lineTo(x+w-r, y);
     g.arc(x+w, y, r, Math.PI, Math.PI/2, true); g.lineTo(x+w, y+h-r);
@@ -145,21 +167,24 @@ var GUEST = (function(){
     g.arc(x, y, r, Math.PI/2, 0, true); g.closePath();
   }
   function diamond(g, x, y, r){ g.beginPath(); g.moveTo(x, y-r); g.lineTo(x+r, y); g.lineTo(x, y+r); g.lineTo(x-r, y); g.closePath(); g.fill(); }
+
   function draw(g, W, line, addr){
-    var cx = W/2; g.textAlign = "center"; g.textBaseline = "middle";
-    var ns = fit(g, line, "700", 30, 820, 20), nw = g.measureText(line).width, as = 0, aw = 0;
-    if (addr) { as = fit(g, addr, "400", 21, 820, 15); aw = g.measureText(addr).width; }
+    var cx = W / 2;
+    var nt = fitInk(line, "700", 30, 820, 20, MAROON), ns = nt.size;
+    var at = null, as = 0;
+    if (addr) { at = fitInk(addr, "400", 21, 820, 15, BROWN); as = at.size; }
     var padX = 60, padT = 22, gap = addr ? 16 : 0, padB = 20;
-    var bw = Math.max(Math.max(nw, aw) + padX*2, 460);
+    var bw = Math.max(Math.max(nt.w, at ? at.w : 0) + padX * 2, 460);
     var bh = padT + ns + gap + (addr ? as : 0) + padB;
-    var bx = cx - bw/2, by = TOP + (H - bh)/2;
-    var ny = by + padT + ns/2, ay = ny + ns/2 + gap + as/2;
+    var bx = cx - bw / 2, by = TOP + (H - bh) / 2;
+    var ny = by + padT + ns / 2, ay = ny + ns / 2 + gap + as / 2;
     g.fillStyle = CREAM; notched(g, bx, by, bw, bh, 14); g.fill();
     g.strokeStyle = MAROON; g.lineWidth = 1.8; notched(g, bx, by, bw, bh, 14); g.stroke();
     g.lineWidth = 0.9; notched(g, bx+7, by+7, bw-14, bh-14, 10); g.stroke();
     g.fillStyle = MAROON; diamond(g, bx+26, ny, 4); diamond(g, bx+bw-26, ny, 4);
-    g.font = "700 " + ns + 'px "CardDeva"'; g.fillText(line, cx, ny);
-    if (addr) { g.fillStyle = BROWN; g.font = "400 " + as + 'px "CardDeva"'; g.fillText(addr, cx, ay); }
+    // alphabetic baseline sits ~0.33em below the visual middle of a Devanagari line
+    place(g, nt, cx, ny + ns * 0.33);
+    if (at) place(g, at, cx, ay + as * 0.33);
   }
   return {draw: draw};
 })();
